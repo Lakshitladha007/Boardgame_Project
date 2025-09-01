@@ -9,7 +9,6 @@ pipeline {
     environment {
         MAVEN_SETTINGS = '/var/lib/jenkins/.m2/settings.xml'
         AWS_REGION = 'ap-south-1'
-        // ECR_REPO = credentials('ECR_REPO')
         NEXUS_VERSION = "nexus3"
         NEXUS_PROTOCOL = "http"
         NEXUS_URL = "13.234.247.67:8081"
@@ -18,8 +17,10 @@ pipeline {
         ARTIFACT_VERSION = "${BUILD_NUMBER}"
         EKS_CLUSTER="boardgame-eks-cluster"
         ECR_REGISTRY="123115277439.dkr.ecr.ap-south-1.amazonaws.com"
+        IMAGE_NAME="boardgame-project-image"
         IMAGE_TAG="latest"
         ECR_REPO="my-app"
+        AWS_ACCOUNT_NUMER="123115277439"
     }
     
     stages {
@@ -59,7 +60,7 @@ pipeline {
         
         stage("Quality Gate") {
             steps {
-                timeout(time: 2, unit: 'MINUTES') {
+                timeout(time: 3, unit: 'MINUTES') {
                     waitForQualityGate abortPipeline: true
                 }
             }
@@ -87,18 +88,11 @@ pipeline {
                 echo "✅ Artifact deployment completed"
             }
         }
-        // stage('Build Docker Image') {
-        //     steps {
-        //         echo "🐳 Starting Docker build for image: my-app:build${BUILD_NUMBER}"
-        //         sh "docker build -t my-app:build${BUILD_NUMBER} ."
-        //         echo "✅ Docker build completed for image: my-app:build${BUILD_NUMBER}"
-        //     }
-        // }
         
         stage('Docker Build') {
             steps {
                 sh """
-                  docker build -t $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG .
+                  docker build -t ${IMAGE_NAME}:${env.BUILD_NUMBER} .
                 """
             }
         }
@@ -106,7 +100,7 @@ pipeline {
         
         stage('Scan Docker Image with Trivy') {
             steps {
-                echo "🔍 Starting Trivy scan for Docker image: my-app:build${BUILD_NUMBER}"
+                echo "🔍 Starting Trivy scan for Docker image: ${IMAGE_NAME}:${env.BUILD_NUMBER} "
                 sh """
                   trivy image --severity HIGH,CRITICAL -f table -o trivy-report.txt my-app:build${BUILD_NUMBER} || true
                 """
@@ -130,40 +124,36 @@ pipeline {
                 echo "✅ AWS ECR login successful"
             }
         }
-        
-        // stage('Login to AWS ECR') {
-        //     steps {
-        //         echo "🔑 Logging in to AWS ECR..."
-        //         sh '''
-        //             aws ecr get-login-password --region ${AWS_REGION} | \
-        //             docker login --username AWS --password-stdin ${ECR_REGISTRY}
-        //             '''
-        //         echo "✅ AWS ECR login successful"
-        //     }
-        // }
-
-    //   stage('Push Docker Image to ECR') {
-    //         steps {
-    //             echo "🚀 Tagging and pushing Docker image to ECR: ${ECR_REPO}:${BUILD_NUMBER}"
-    //             sh """
-    //               docker tag my-app:build${BUILD_NUMBER} ${ECR_REPO}:${BUILD_NUMBER}
-    //               docker push ${ECR_REPO}:${BUILD_NUMBER}
-    //             """
-    //             echo "✅ Docker image pushed: ${ECR_REPO}:${BUILD_NUMBER}"
-    //         }
-    //     }
-        stage('Push to ECR') {
+      
+        stage('Push docker image to ECR') {
             steps {
-                sh "docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG"
+                sh """
+                docker tag ${IMAGE_NAME}:${env.BUILD_NUMBER} ${AWS_ACCOUNT_NUMER}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${env.BUILD_NUMBER}
+                docker push ${AWS_ACCOUNT_NUMER}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${env.BUILD_NUMBER}"""
+            }
+            post {
+                success {
+                    sh """
+                        docker rmi ${IMAGE_NAME}:${env.BUILD_NUMBER} || true
+                    """
+                }
             }
         }
         
         stage('Deploy to EKS') {
             steps {
                 script {
-                    // Update kubeconfig
-                    sh "aws eks update-kubeconfig --region $AWS_REGION --name $EKS_CLUSTER"
-                    sh 'kubectl apply -f deployment-service.yaml'
+                    sh """
+                       sed -e "s|ECR_REGISTRY|${ECR_REGISTRY}|g" \
+                           -e "s|ECR_REPO|${ECR_REPO}|g" \
+                           -e "s|BUILD_ID|${env.BUILD_NUMBER}|g" \
+                           deployment-service.yaml > deployment.yaml
+                    """
+                }
+                script {
+                    sh 'cat deployment.yaml'
+                    sh "aws eks update-kubeconfig --region ${AWS_REGION} --name ${EKS_CLUSTER}"
+                    sh 'kubectl apply -f deployment.yaml'
                 }
             }
         }
@@ -172,17 +162,16 @@ pipeline {
     post {
         failure {
             mail to: 'lakshitladha05@gmail.com',
-                subject: "❌ FAILED: ${env.JOB_NAME} [#${env.BUILD_NUMBER}]",
+                subject: "FAILED: ${env.JOB_NAME} [#${env.BUILD_NUMBER}]",
                 body: """\
                 Hello Team,
                 
                 The build for *${env.JOB_NAME}* has **FAILED**.
                 
-                🔢 Build Number : ${env.BUILD_NUMBER}
-                👤 Triggered By : ${env.BUILD_USER ?: 'N/A'}
+                Build Number : ${env.BUILD_NUMBER}
                 
-                📄 Console Log : ${env.BUILD_URL}
-                🌊 Blue Ocean   : ${env.RUN_DISPLAY_URL}
+                Console Log : ${env.BUILD_URL}
+                Blue Ocean   : ${env.RUN_DISPLAY_URL}
                 
                 Please check the logs and fix the issue.
                 """
@@ -190,19 +179,17 @@ pipeline {
     
         success {
             mail to: 'lakshitladha05@gmail.com',
-                subject: "✅ SUCCESS: ${env.JOB_NAME} [#${env.BUILD_NUMBER}]",
+                subject: "SUCCESS: ${env.JOB_NAME} [#${env.BUILD_NUMBER}]",
                 body: """\
                 Hello Team,
                 
                 The build for *${env.JOB_NAME}* was **SUCCESSFUL**.
                 
-                🔢 Build Number : ${env.BUILD_NUMBER}
-                👤 Triggered By : ${env.BUILD_USER ?: 'N/A'}
+                Build Number : ${env.BUILD_NUMBER}
                 
-                📄 Console Log : ${env.BUILD_URL}
-                🌊 Blue Ocean   : ${env.RUN_DISPLAY_URL}
+                Console Log : ${env.BUILD_URL}
+                Blue Ocean   : ${env.RUN_DISPLAY_URL}
                 """
         }
     }
-
 }
