@@ -1,53 +1,62 @@
 # BoardgameListingWebApp
 
-## Description
+### Description
 
-**Board Game Database Full-Stack Web Application.**
-This web application displays lists of board games and their reviews. While anyone can view the board game lists and reviews, they are required to log in to add/ edit the board games and their reviews. The 'users' have the authority to add board games to the list and add reviews, and the 'managers' have the authority to edit/ delete the reviews on top of the authorities of users.  
+**Board Game Database Full-Stack Web Application.** This web application displays lists of board games and their reviews. While anyone can view the board game lists and reviews, they are required to log in to add/ edit the board games and their reviews. The 'users' have the authority to add board games to the list and add reviews, and the 'managers' have the authority to edit/ delete the reviews on top of the authorities of users.
 
-## Technologies
+### CI/CD Pipeline Overview (Jenkinsfile)
 
-- Java
-- Spring Boot
-- Amazon Web Services(AWS) EC2
-- Thymeleaf
-- Thymeleaf Fragments
-- HTML5
-- CSS
-- JavaScript
-- Spring MVC
-- JDBC
-- H2 Database Engine (In-memory)
-- JUnit test framework
-- Spring Security
-- Twitter Bootstrap
-- Maven
+#### Pipeline Tools & Environment Setup
+1. Maven (M3) → For building Java project
 
-## Features
+2. JDK11 → Java runtime for Maven & SonarQube
 
-- Full-Stack Application
-- UI components created with Thymeleaf and styled with Twitter Bootstrap
-- Authentication and authorization using Spring Security
-  - Authentication by allowing the users to authenticate with a username and password
-  - Authorization by granting different permissions based on the roles (non-members, users, and managers)
-- Different roles (non-members, users, and managers) with varying levels of permissions
-  - Non-members only can see the boardgame lists and reviews
-  - Users can add board games and write reviews
-  - Managers can edit and delete the reviews
-- Deployed the application on AWS EC2
-- JUnit test framework for unit testing
-- Spring MVC best practices to segregate views, controllers, and database packages
-- JDBC for database connectivity and interaction
-- CRUD (Create, Read, Update, Delete) operations for managing data in the database
-- Schema.sql file to customize the schema and input initial data
-- Thymeleaf Fragments to reduce redundancy of repeating HTML elements (head, footer, navigation)
+3. Environment Variables → Preconfigured for Nexus, ECR, EKS cluster, etc.
 
-## How to Run
+#### Pipeline Stages
 
-1. Clone the repository
-2. Open the project in your IDE of choice
-3. Run the application
-4. To use initial user data, use the following credentials.
-  - username: bugs    |     password: bunny (user role)
-  - username: daffy   |     password: duck  (manager role)
-5. You can also sign-up as a new user and customize your role to play with the application! 😊
+**1. Git Checkout**
+Clones the code from GitHub (main branch) using a PAT (Personal Access Token).
+
+**2.Code Analysis (SonarQube)**
+Runs SonarQube analysis with a PAT token. Checks code quality, security vulnerabilities, bugs, and code smells.
+
+**3.Quality Gate**
+Waits for SonarQube’s Quality Gate result.<br>
+*If it fails* -> Pipeline stops immediately.
+*If it passes* -> Pipeline continues.
+
+**4.Build**
+Executes mvn clean install to package the Java application into a JAR file.
+
+**5.Deploy to Nexus**
+Uploads the JAR artifact into Nexus repository. Uses Nexus credentials (nexus-creds).
+
+**6.Docker Build**
+Builds a Docker image from the application source code.<br>
+Tags it with IMAGE_NAME:BUILD_NUMBER.<br>
+
+**7.Trivy Security Scan**
+Runs a Trivy security scan on the Docker image to check image vulnerabilities and generates a report (trivy-report.txt) with HIGH/CRITICAL vulnerabilities.
+
+**8.Login to AWS ECR**
+Logs in to AWS Elastic Container Registry (ECR) using AWS credentials (aws-creds).
+
+**9.Push Docker Image to ECR**
+This step tags the Docker image with:<br>
+${AWS_ACCOUNT_NUMER}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${BUILD_NUMBER}<br>
+<br>
+Pushes the image to AWS ECR.<br>
+Cleans up the local image after successful push of the image to ECR.<br>
+
+**10.Deploy to EKS (Kubernetes)**
+This step first Updates Kubernetes manifest(deployment-service.yaml) with ECR registry, Repository name, Build number and Saves it as deployment.yml<br>
+Applies it to EKS cluster using:<br>
+```bash
+aws eks update-kubeconfig --region ${AWS_REGION} --name ${EKS_CLUSTER}
+kubectl apply -f deployment.yaml
+```
+
+**10.Post-Build Actions**
+*On Failure* → Sends an email with build failure details, logs, and links.<br>
+*On Success* → Sends an email with success notification and build details.
