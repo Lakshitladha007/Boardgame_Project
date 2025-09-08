@@ -23,21 +23,54 @@
 - Nexus Server (t3.medium): Artifact Repository (JAR/TAR storage)
 - Monitoring Server (t3.medium): Prometheus & Grafana
 
-2.  AWS ECR
+2.  AWS ECR<br>
 - Used to store docker images after build and are pulled for deployment.
 
-3. AWS EKS Cluster
+3. AWS EKS Cluster<br>
 - Managed Kubernetes control plane
 - Worker Node Group (2 EC2 nodes)
 - Integrated with AWS ECR for storing container images
 
-4. Monitoring Layer
+4. Monitoring Layer<br>
 - Prometheus + Grafana dashboards
 - Metrics collected via node-exporter and kube-state-metrics
 
+### End-to-End Setup:<br>
+1. Jenkins Setup <br>
+- Opened port 8080 in the security group to allow Jenkins web UI access.
+- Allowed SSH from single EC2(Main web server)
+- Installed essential Jenkins plugins.
+- Installed trivy on this EC2 server itself.
+
+2. SonarQube Setup (Code Quality)<br>
+- Deployed SonarQube on a separate EC2 instance (port 9000).
+- Allowed SSH from single EC2(Main web server)
+- Configured webhook → sends Quality Gate results back to Jenkins.
+
+3. Nexus Repository Setup (Artifact Management)<br>
+- Installed Nexus Repository Manager on an EC2 server (port 8081).
+- Allowed SSH from single EC2(Main web server)
+- Created dedicated Maven hosted repositories for JARs (application builds)
+
+4. AWS EKS Cluster (Kubernetes Deployment)<br>
+- Provisioned an EKS cluster using AWS console/CLI.
+- Configured IAM roles & RBAC bindings for Jenkins to deploy workloads.
+- Added a managed node group with two EC2 worker nodes.
+On Jenkins EC2:<br>
+- Installed kubectl and AWS CLI.
+- Updated aws-auth ConfigMap to allow node → cluster communication.
+
+5. CI/CD Pipeline (Jenkinsfile Workflow)<br>
+- explained separately each step in the ending.
+
+6. Monitoring & Observability<br>
+- Provisioned Prometheus & Grafana on a monitoring EC2 instance.
+- Open 9090 (Prometheus) and 3000 (Grafana) in the EC2 security group.
+- Allowed SSH from single EC2(Main web server)
+
 ### CI/CD Pipeline Overview (Jenkinsfile)
 
-#### Pipeline Tools & Environment Setup
+##### Pipeline Tools & Environment Setup
 1. Maven (M3) → For building Java project
 
 2. JDK11 → Java runtime for Maven & SonarQube
